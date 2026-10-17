@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <title>自製電子書 - 〈破解文言文2〉</title>
+  <style>
+    @page { size: A4; margin: 12mm 15mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body {
+      margin: 0; padding: 0; background-color: #e2e8f0;
+      font-family: "Times New Roman", "標楷體", "DFKai-SB", "BiauKai", serif;
+      font-size: 14pt; line-height: 1.6; color: #111;
+    }
+
+    /* 課堂懸浮工具列 (純 Emoji 極簡膠囊) */
+    .classroom-toolbar {
+      position: fixed; top: 14px; right: 20px; z-index: 9999;
+      display: flex; align-items: center; gap: 3px;
+      background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      padding: 4px 8px; border-radius: 40px;
+      border: 1px solid rgba(203, 213, 225, 0.9);
+      box-shadow: 0 4px 22px rgba(0, 0, 0, 0.12);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .tool-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 36px; height: 36px; font-size: 18px; color: #334155;
+      background: transparent; border: 1px solid transparent; border-radius: 50%;
+      cursor: pointer; transition: all 0.15s ease; padding: 0; user-select: none;
+    }
+    .tool-btn:hover { background: #f1f5f9; transform: scale(1.1); }
+    .tool-btn.active { background: #0f172a; color: #ffffff; }
+    .btn-toggle-ans.active { background: #eff6ff; border-color: #3b82f6; }
+    .toolbar-divider { width: 1px; height: 18px; background: #cbd5e1; margin: 0 3px; }
+
+    /* 章節目錄跳轉選單 */
+    .toc-menu {
+      display: none; position: absolute; top: 46px; left: 0;
+      background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.18); padding: 6px 0;
+      min-width: 250px; max-height: 420px; overflow-y: auto; z-index: 10000;
+    }
+    .toc-menu.show { display: block; animation: tocFadeIn 0.15s ease-out; }
+    @keyframes tocFadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .toc-menu-title {
+      padding: 6px 16px 8px 16px; font-size: 13px; font-weight: bold;
+      color: #64748b; border-bottom: 1px solid #f1f5f9;
+    }
+    .toc-menu-item {
+      padding: 8px 16px; font-size: 14px; color: #334155; cursor: pointer;
+      display: flex; align-items: center; justify-content: space-between;
+      transition: background 0.12s, color 0.12s;
+    }
+    .toc-menu-item:hover { background: #eff6ff; color: #2563eb; font-weight: bold; }
+    .toc-page-badge { font-size: 12px; color: #94a3b8; font-weight: normal; }
+    .toc-menu-item:hover .toc-page-badge { color: #2563eb; }
+
+    /* 畫筆面板 */
+    .pen-options {
+      display: none; align-items: center; gap: 6px; background: #f8fafc;
+      padding: 3px 8px; border-radius: 20px; border: 1px solid #e2e8f0; margin-left: 2px;
+    }
+    .color-picker { display: flex; align-items: center; gap: 5px; }
+    .color-dot {
+      width: 16px; height: 16px; border-radius: 50%; cursor: pointer;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,0.2);
+    }
+    .color-dot.active { transform: scale(1.2); box-shadow: 0 0 0 2px #0f172a; }
+    .size-picker { display: flex; align-items: center; gap: 3px; }
+    .size-btn {
+      border: 1px solid #cbd5e1; background: #fff; color: #475569; font-size: 11px;
+      font-weight: bold; padding: 2px 7px; border-radius: 10px; cursor: pointer;
+    }
+    .size-btn.active { background: #0f172a; color: #fff; border-color: #0f172a; }
+
+    /* A4 頁面容器 */
+    .pages-container { padding: 20px 0 40px 0; }
+    .page {
+      width: 210mm; min-height: 297mm; padding: 14mm 16mm; margin: 0 auto 25px auto;
+      background: #ffffff; box-shadow: 0 6px 16px rgba(0,0,0,0.15);
+      page-break-after: always; break-after: page; position: relative;
+    }
+    .drawing-canvas {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 20; pointer-events: none;
+    }
+    body.pen-mode .drawing-canvas { pointer-events: auto; cursor: crosshair; }
+
+    /* 頁面標題與結構 */
+    .page-header {
+      display: flex; justify-content: space-between; border-bottom: 2px solid #334155;
+      padding-bottom: 6px; margin-bottom: 10px; font-size: 13pt; font-weight: bold;
+    }
+    .main-title { font-size: 20pt; font-weight: 900; text-align: center; margin: 6px 0 12px 0; }
+    .section-title {
+      font-size: 15pt; font-weight: bold; margin: 15px 0 10px 0; 
+    }
+    .task-title { font-size: 14pt; font-weight: bold; margin: 8px 0 6px 0; }
+    
+    .item-line { padding: 8px 10px; border-radius: 6px; line-height: 1.8; font-size: 14pt; transition: background 0.2s;}
+    body:not(.pen-mode) .interactive-item { cursor: pointer; }
+    body:not(.pen-mode) .interactive-item:hover { background-color: #f8fafc; outline: 1px dashed #93c5fd; }
+
+    /* 解答樣式：紅筆圈選與填入 */
+    .correct-choice { display: inline-block; padding: 0 4px; transition: all 0.2s; }
+    .show-ans .correct-choice, .item-line.show-one .correct-choice, .qa-block.show-one .correct-choice {
+      color: #dc2626 !important; font-weight: bold !important; border: 2px solid #dc2626 !important;
+      border-radius: 14px !important; background-color: #fef2f2 !important; padding: 0 6px !important;
+    }
+    .ans-slot { display: inline-block; min-width: 40px; text-align: center; color: transparent; font-weight: bold; border-bottom: 1.5px solid #333; padding: 0 6px; }
+    .show-ans .ans-slot, .item-line.show-one .ans-slot, .qa-block.show-one .ans-slot { color: #2563eb !important; }
+    
+    .ans-word { color: transparent; font-weight: bold; padding: 0 4px; }
+    .show-ans .ans-word, .item-line.show-one .ans-word { color: #dc2626 !important; }
+
+    /* 解析文字專用 */
+    .analysis-text { color: transparent; font-size: 12pt; margin-left: 10px; }
+    .show-ans .analysis-text, .qa-block.show-one .analysis-text { color: #059669 !important; }
+
+    /* 結構排版 */
+    .grid-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; }
+    .qa-block { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; padding: 6px 8px; border-radius: 6px;}
+    .qa-bracket { flex-shrink: 0; width: 54px; text-align: center; font-weight: bold; font-size: 14pt; }
+    .qa-content { flex: 1; }
+    .qa-options { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+
+    /* 補充小卡排版 */
+    .supp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; margin-bottom: 20px;}
+    .supp-card { border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .supp-card-title { font-weight: bold; background: #fff7ed; display: inline-block; padding: 4px 10px; border-radius: 6px; margin-bottom: 8px; font-size: 13pt; color: #c2410c; }
+    .supp-card-text { font-size: 12.5pt; color: #334155; line-height: 1.6; }
+
+    /* 閱讀框 */
+    .reading-box { border: 2px solid #334155; padding: 16px 20px; margin-bottom: 20px; border-radius: 8px; background-color: #fafaf9;}
+
+    .toast-notice {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: #0f172a; color: #fff; padding: 10px 20px; border-radius: 30px;
+      font-size: 13px; z-index: 10000; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      display: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    /* 列印強制隱藏解答、目錄與工具列，還原純淨白紙卷 */
+    @media print {
+      body { background: transparent !important; padding: 0 !important; }
+      .no-print, .classroom-toolbar, .toc-menu, .drawing-canvas { display: none !important; }
+      .page { margin: 0 !important; box-shadow: none !important; width: 100% !important; min-height: auto !important; padding: 0 !important; }
+      .correct-choice { color: inherit !important; font-weight: normal !important; border: none !important; background: transparent !important; padding: 0 !important; }
+      .ans-slot { color: transparent !important; border-bottom: 1.5px solid #333 !important; }
+      .ans-word, .analysis-text { color: transparent !important; }
+      .reading-box { border: 1px solid #111; background-color: transparent; }
+      .supp-card { border: 1px solid #999; box-shadow: none; background-color: transparent;}
+      .supp-card-title { background-color: transparent; border: 1px solid #ccc; color: #111;}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 課堂懸浮工具列 -->
+  <div class="classroom-toolbar no-print">
+    <div style="position: relative;">
+      <button class="tool-btn" id="tocBtn" onclick="toggleTocMenu(event)" title="章節目錄導覽">📑</button>
+      <div class="toc-menu" id="tocMenu">
+        <div class="toc-menu-title">📖 單元章節目錄</div>
+        <div class="toc-menu-item" onclick="jumpTo('sec-1')"><span>一、短文閱讀與字詞解釋</span><span class="toc-page-badge">P.1</span></div>
+        <div class="toc-menu-item" onclick="jumpTo('sec-2')"><span>補充說明：典故與寓意</span><span class="toc-page-badge">P.1</span></div>
+        <div class="toc-menu-item" onclick="jumpTo('sec-3')"><span>二、文意理解選擇題</span><span class="toc-page-badge">P.2</span></div>
+        <div class="toc-menu-item" onclick="jumpTo('sec-4')"><span>三、自我挑戰</span><span class="toc-page-badge">P.2</span></div>
+      </div>
+    </div>
+    <button class="tool-btn btn-toggle-ans" id="toggleAllAnsBtn" onclick="toggleAllAnswers()" title="一鍵全開/全隱答案">
+      <span id="ansIcon">👁️</span>
+    </button>
+    <button class="tool-btn" id="penBtn" onclick="togglePenMode()" title="螢光筆/板書筆">✏️</button>
+    <div class="pen-options" id="penOptions">
+      <div class="color-picker">
+        <span class="color-dot active" style="background:#facc15;" onclick="setPenColor('rgba(250, 204, 21, 0.45)', this)" title="螢光黃"></span>
+        <span class="color-dot" style="background:#ef4444;" onclick="setPenColor('rgba(239, 68, 68, 0.8)', this)" title="紅筆"></span>
+        <span class="color-dot" style="background:#3b82f6;" onclick="setPenColor('rgba(37, 99, 235, 0.8)', this)" title="藍筆"></span>
+        <span class="color-dot" style="background:#10b981;" onclick="setPenColor('rgba(16, 185, 129, 0.8)', this)" title="綠筆"></span>
+      </div>
+      <div style="width:1px; height:14px; background:#cbd5e1; margin:0 2px;"></div>
+      <div class="size-picker">
+        <button class="size-btn" onclick="setPenSize(4, this)">細</button>
+        <button class="size-btn" onclick="setPenSize(10, this)">中</button>
+        <button class="size-btn active" onclick="setPenSize(20, this)">粗</button>
+      </div>
+    </div>
+    <button class="tool-btn" onclick="clearAllDrawings()" title="清除本卷筆跡">🧹</button>
+    <div class="toolbar-divider"></div>
+    <button class="tool-btn" onclick="smartPrint()" title="列印純淨學生白紙卷">🖨️</button>
+    <button class="tool-btn" onclick="openInNewTab()" title="在全螢幕獨立分頁中授課">↗</button>
+  </div>
+
+  <div id="toastNotice" class="toast-notice"></div>
+
+  <!-- A4 頁面內容區 -->
+  <div class="pages-container">
+    
+    <!-- 第一頁 -->
+    <div class="page" id="page-1">
+      <canvas class="drawing-canvas"></canvas>
+      <div class="page-header">
+        <span>〈破解文言文2〉教用</span>
+        <span>座號：_______ 姓名：_____________</span>
+      </div>
+      
+      <div class="section-title" id="sec-1">●115會考題：一、請閱讀以下短文，並將詞性、解釋，寫在括號中：</div>
+      
+      <div class="reading-box">
+        <div class="item-line interactive-item" onclick="toggleItemAnswer(this)">
+          1 <u>田饒</u>事（ <span class="ans-slot">侍奉</span> ）<u>魯哀公</u>，而不見（ <span class="ans-slot">被</span> ）察（ <span class="ans-slot">察覺、賞識</span> ）。
+        </div>
+        
+        <div class="item-line interactive-item" onclick="toggleItemAnswer(this)">
+          2 (補主語： <span class="ans-slot">田饒</span> )謂<u>哀公</u>曰：「臣將去（ <span class="ans-slot">離開</span> ）君，黃鵠<span class="ans-word">（神話傳說中的大鳥，能一舉千里）</span>舉（ <span class="ans-slot">飛</span> ）矣。」
+        </div>
+
+        <div class="item-line interactive-item" onclick="toggleItemAnswer(this)">
+          3 <u>哀公</u>曰：「何謂也？」<u>田饒</u>曰：「君獨不見夫雞乎？(補主語： <span class="ans-slot">雞</span> )頭戴冠者，文（ <span class="ans-slot">文采</span> ）也；足傅距<sup>1</sup>者，武（ <span class="ans-slot">勇武</span> ）也；敵在前敢鬥者，勇也；見食（ <span class="ans-slot">食物</span> ）相（ <span class="ans-slot">互相</span> ）告者，仁（ <span class="ans-slot">仁德</span> ）也；守夜不失時者，信也。
+        </div>
+
+        <div class="item-line interactive-item" onclick="toggleItemAnswer(this)">
+          4 雞雖有此五德，君猶煮而食之(［代詞］指 <span class="ans-slot">雞</span> )者，何也？則以（ <span class="ans-slot">因為</span> ）其(［代詞］指 <span class="ans-slot">雞</span> )所從來者（ <span class="ans-slot">來自的地方</span> ）近也。
+        </div>
+
+        <div class="item-line interactive-item" onclick="toggleItemAnswer(this)">
+          5 夫黃鵠一舉千里，止君園池，食君魚鱉，啄君黍粱（ <span class="ans-slot">穀物</span> ），無此五德，君猶貴之(［代詞］指 <span class="ans-slot">黃鵠</span> )者，何也？以其所從來者遠也。
+        </div>
+
+        <div class="item-line interactive-item" onclick="toggleItemAnswer(this)">
+          6 臣將去（ <span class="ans-slot">離開</span> ）君，黃鵠舉（ <span class="ans-slot">飛</span> ）矣。」
+        </div>
+
+        <div class="item-line interactive-item" onclick="toggleItemAnswer(this)">
+          7 遂（ <span class="ans-slot">於是</span> ）去（ <span class="ans-slot">離開</span> ）之（ <span class="ans-slot">往、到</span> ）<u>燕</u>，<u>燕</u>以(補省略： <span class="ans-slot">田饒</span> )為相（ <span class="ans-slot">宰相</span> ），三年，<u>燕</u>政大平。
+        </div>
+        
+        <div style="text-align: right; font-size: 13pt; margin-top: 15px; margin-bottom: 10px;">
+          ——改寫自<u>韓嬰</u>《韓詩外傳》
+        </div>
+        <div style="font-size: 12pt; color: #475569; border-top: 1px dashed #cbd5e1; padding-top: 8px;">
+          【注釋】1. 足傅距：腳上長著爪子
+        </div>
+      </div>
+
+      <div class="section-title" id="sec-2">補充：</div>
+      <div class="supp-grid">
+        <div class="supp-card">
+          <div class="supp-card-title">不見察</div>
+          <div class="supp-card-text">指自己的才華或付出沒有被上司看到或賞識。具體來說，就像你在分組報告中做了最多貢獻，組長卻只誇獎那個最後上台報告的人，你的努力完全被忽視了。</div>
+        </div>
+        <div class="supp-card">
+          <div class="supp-card-title">五德（文、武、勇、仁、信）</div>
+          <div class="supp-card-text">這裡將雞的生理構造與行為連結到優良的人格特質。簡單來說，就是一個人具備了「有學問、有體魄、有膽量、懂分享、講信用」五大優點。就像是一位全方位發展的優等生，每個科目都拿優等。</div>
+        </div>
+        <div class="supp-card">
+          <div class="supp-card-title">所從來者近</div>
+          <div class="supp-card-text">因為來源或距離很近，所以讓人感到習以為常而不去珍惜。就像你每天都喝媽媽親手熬的雞湯，覺得理所當然甚至嫌煩；但如果去米其林餐廳排隊三小時喝到同樣的湯，你反而會覺得那碗湯特別珍貴。</div>
+        </div>
+        <div class="supp-card">
+          <div class="supp-card-title">黃鵠舉矣</div>
+          <div class="supp-card-text">黃鵠（天鵝）要展翅高飛了。這裡是用來比喻「有才華的人即將離開不珍惜他的地方，前往能發揮實力的平台」。就像一名頂尖的軟體工程師，決定辭掉整天叫他修電腦的現職，跳槽到能讓他研發人工智慧的頂尖企業。</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 第二頁 -->
+    <div class="page" id="page-2">
+      <canvas class="drawing-canvas"></canvas>
+      <div class="page-header">
+        <span>〈破解文言文2〉教用</span>
+        <span>第 2 頁</span>
+      </div>
+
+      <div class="section-title" id="sec-3">二、請根據上文，回答41~42題，錯誤選項請寫上解析：</div>
+      
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-word" style="color:transparent; border:none; padding:0;">B</span>)</div>
+        <div class="qa-content">
+          <div class="task-title">41. 下列文句「」中文字的解釋，何者最恰當？【通過率：68%】</div>
+          <div class="qa-options">
+            <div>(A) <u>田饒</u>事<u>魯哀公</u>，而「不見察」：不懂得自我反省 <span class="analysis-text">→ 解析：不被察覺/賞識</span></div>
+            <div><span class="correct-choice">(B) 「見食相告」者，仁也：看到食物就通知夥伴</span></div>
+            <div>(C) 夫黃鵠「一舉千里」：高踞樹頂，眼界開闊 <span class="analysis-text">→ 解析：飛得高遠</span></div>
+            <div>(D) 「遂去之<u>燕</u>」，<u>燕</u>以為相：離開了<u>燕國</u> <span class="analysis-text">→ 解析：前往/到了燕國</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-word" style="color:transparent; border:none; padding:0;">B</span>)</div>
+        <div class="qa-content">
+          <div class="task-title">42. 根據本文，<u>田饒</u>認為<u>哀公</u>晉用人才的態度，與下列何者最接近？【通過率：35%】</div>
+          <div class="qa-options" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>(A) 肥水不落外人田</div>
+            <div><span class="correct-choice">(B) 遠來的和尚會念經</span></div>
+            <div>(C) 不求有功，但求無過</div>
+            <div>(D) 內舉不避親，外舉不避仇</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title" id="sec-4" style="margin-top: 30px;">三、自我挑戰</div>
+      
+      <div class="reading-box" style="margin-bottom: 15px;">
+        或問：「世間何物最硬？」曰：「石頭與鋼鐵。」其人曰：「石可碎，鐵可鍛，安得為硬？以弟看來為兄面上鬍鬚最硬，鐵石總不如也。」問其故，答曰：「兄面皮厚，竟被鑽出。」鬚者回嘲曰：「足下面皮更老，這等硬鬚還鑽不透。」
+      </div>
+
+      <div class="qa-block interactive-item" onclick="toggleItemAnswer(this)">
+        <div class="qa-bracket">(<span class="ans-word" style="color:transparent; border:none; padding:0;">D</span>)</div>
+        <div class="qa-content">
+          <div class="task-title">21. 根據這則笑話，以鬚者的立場來看，下列何者最硬？【通過率：49%】</div>
+          <div class="qa-options" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>(A) 石頭與鋼鐵</div>
+            <div>(B) 鬚者的面皮</div>
+            <div>(C) 面皮上的鬍鬚</div>
+            <div><span class="correct-choice">(D) 無鬚者的面皮</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 互動腳本 -->
+  <script>
+    // 0. 目錄面板切換與平滑跳轉
+    function toggleTocMenu(e) {
+      if (e) e.stopPropagation();
+      const menu = document.getElementById('tocMenu');
+      if (menu) menu.classList.toggle('show');
+    }
+
+    function jumpTo(targetId) {
+      const el = document.getElementById(targetId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      const menu = document.getElementById('tocMenu');
+      if (menu) menu.classList.remove('show');
+    }
+
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('tocMenu');
+      const btn = document.getElementById('tocBtn');
+      if (menu && menu.classList.contains('show')) {
+        if (!menu.contains(e.target) && e.target !== btn) {
+          menu.classList.remove('show');
+        }
+      }
+    });
+
+    // 1. 逐題點擊顯現答案
+    function toggleItemAnswer(el) {
+      if (document.body.classList.contains('pen-mode')) return;
+      el.classList.toggle('show-one');
+      
+      // 處理選擇題括弧內的字母顯示邏輯（配合透明字體設定）
+      const ansBracket = el.querySelector('.qa-bracket .ans-word');
+      if (ansBracket) {
+        if (el.classList.contains('show-one')) {
+          ansBracket.style.color = '#dc2626';
+        } else {
+          ansBracket.style.color = 'transparent';
+        }
+      }
+    }
+
+    // 2. 一鍵全開 / 全隱答案
+    var isAllAnsShown = false;
+    function toggleAllAnswers() {
+      isAllAnsShown = !isAllAnsShown;
+      var container = document.querySelector('.pages-container');
+      var btn = document.getElementById('toggleAllAnsBtn');
+      var btnIcon = document.getElementById('ansIcon');
+      
+      if (isAllAnsShown) {
+        container.classList.add('show-ans'); btn.classList.add('active'); btnIcon.textContent = '🙈';
+        document.querySelectorAll('.qa-bracket .ans-word').forEach(el => el.style.color = '#dc2626');
+      } else {
+        container.classList.remove('show-ans'); btn.classList.remove('active'); btnIcon.textContent = '👁️';
+        document.querySelectorAll('.item-line.show-one, .qa-block.show-one').forEach(function(item) { 
+          item.classList.remove('show-one'); 
+        });
+        document.querySelectorAll('.qa-bracket .ans-word').forEach(el => el.style.color = 'transparent');
+      }
+    }
+
+    // 3. 畫筆工具
+    var isPenMode = false;
+    var currentPenColor = 'rgba(250, 204, 21, 0.45)';
+    var currentPenSize = 20;
+    function setPenColor(color, el) {
+      currentPenColor = color;
+      document.querySelectorAll('.color-dot').forEach(function(d) { d.classList.remove('active'); });
+      el.classList.add('active');
+    }
+    function setPenSize(size, el) {
+      currentPenSize = size;
+      document.querySelectorAll('.size-btn').forEach(function(b) { b.classList.remove('active'); });
+      el.classList.add('active');
+    }
+    function togglePenMode() {
+      isPenMode = !isPenMode;
+      document.body.classList.toggle('pen-mode', isPenMode);
+      var penBtn = document.getElementById('penBtn');
+      var penOptions = document.getElementById('penOptions');
+      if (isPenMode) { penBtn.classList.add('active'); if (penOptions) penOptions.style.display = 'flex'; }
+      else { penBtn.classList.remove('active'); if (penOptions) penOptions.style.display = 'none'; }
+    }
+    function initCanvases() {
+      document.querySelectorAll('.page').forEach(function(page) {
+        var canvas = page.querySelector('.drawing-canvas');
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        function resizeCanvas() { canvas.width = page.clientWidth; canvas.height = page.clientHeight; }
+        resizeCanvas(); window.addEventListener('resize', resizeCanvas);
+        var isDrawing = false, lastX = 0, lastY = 0;
+        canvas.addEventListener('mousedown', function(e) {
+          if (!isPenMode) return; isDrawing = true;
+          var rect = canvas.getBoundingClientRect(); lastX = e.clientX - rect.left; lastY = e.clientY - rect.top;
+        });
+        canvas.addEventListener('mousemove', function(e) {
+          if (!isDrawing || !isPenMode) return;
+          var rect = canvas.getBoundingClientRect(); var currX = e.clientX - rect.left; var currY = e.clientY - rect.top;
+          ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(currX, currY);
+          ctx.strokeStyle = currentPenColor; ctx.lineWidth = currentPenSize; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+          lastX = currX; lastY = currY;
+        });
+        window.addEventListener('mouseup', function() { isDrawing = false; });
+      });
+    }
+    window.addEventListener('load', initCanvases);
+    function clearAllDrawings() {
+      document.querySelectorAll('.drawing-canvas').forEach(function(canvas) {
+        var ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height);
+      });
+    }
+
+    function showToast(msg) {
+      var toast = document.getElementById('toastNotice');
+      if (!toast) return;
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(function() { toast.style.display = 'none'; }, 3000);
+    }
+
+    // 4. 智慧新分頁純淨輸出白紙卷
+    function getCleanWorksheetHTML(triggerPrintImmediately) {
+      var clonedDoc = document.documentElement.cloneNode(true);
+      var container = clonedDoc.querySelector('.pages-container');
+      if (container) container.classList.remove('show-ans');
+      clonedDoc.querySelectorAll('.show-one').forEach(function(item) {
+        item.classList.remove('show-one');
+      });
+      // 確保括弧字母重置透明
+      clonedDoc.querySelectorAll('.qa-bracket .ans-word').forEach(el => el.style.color = 'transparent');
+      
+      var toast = clonedDoc.querySelector('#toastNotice');
+      if (toast) toast.remove();
+
+      if (triggerPrintImmediately) {
+        var autoPrintScript = document.createElement('script');
+        autoPrintScript.textContent = 'window.addEventListener("load", function() { setTimeout(function() { window.print(); }, 400); });';
+        clonedDoc.querySelector('body').appendChild(autoPrintScript);
+      }
+      return '<!DOCTYPE html>\n<html lang="zh-TW">' + clonedDoc.innerHTML + '</html>';
+    }
+
+    function smartPrint() {
+      try {
+        var htmlContent = getCleanWorksheetHTML(true);
+        var blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        var blobUrl = URL.createObjectURL(blob);
+        var win = window.open(blobUrl, '_blank');
+        if (!win) {
+          showToast('若列印視窗未跳出，請點擊「↗」或允許彈跳視窗！');
+          window.print();
+        }
+      } catch (e) {
+        window.print();
+      }
+    }
+
+    function openInNewTab() {
+      try {
+        var htmlContent = getCleanWorksheetHTML(false);
+        var blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+        var blobUrl = URL.createObjectURL(blob);
+        var win = window.open(blobUrl, '_blank');
+        if (!win) {
+          showToast('請允許瀏覽器彈出式視窗，以順利在新分頁打開講義！');
+        }
+      } catch (e) {
+        showToast('無法在新分頁開啟，請嘗試手動下載。');
+      }
+    }
+  </script>
+</body>
+</html>
+```
+
+### 設計調整亮點：
+1. **無縫接軌您的紙本格式**：將文言文句讀翻譯切割為獨立互動區塊（`<div class="item-line">`），點擊該行，藍底/紅字的填空解答即會自動浮現，非常適合課堂逐句引導。
+2. **精美閱讀補充卡片**：使用 CSS Grid 排版將「補充說明」區塊轉換成 4 張具備柔和底色標題的閱讀小卡，兼具美觀與視覺降載的功能。
+3. **錯誤選項解析隱藏機制**：在選擇題的錯誤選項後方，我加入了一鍵隱藏/顯示的綠色 `解析`，只有當您點擊該題揭曉時才會一併出現。
+4. **雙頁防跑版設定**：考量到文言文排版長度，已替您安排將「短文與補充卡」放置於 P.1，「選擇與挑戰題」放置於 P.2，列印時將產出完美的兩面 A4 學生測驗卷！
